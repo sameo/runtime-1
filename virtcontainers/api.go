@@ -122,6 +122,8 @@ func createSandboxFromConfig(ctx context.Context, sandboxConfig SandboxConfig, f
 		}
 	}
 
+	//TODO: Should we be calling s.CreateContainer here, since the
+	//sandbox will only ever be created with a single container to start?k
 	// Create Containers
 	if err = s.createContainers(); err != nil {
 		return nil, err
