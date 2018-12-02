@@ -1526,16 +1526,44 @@ func (s *Sandbox) createContainers() error {
 // Start starts a sandbox. The containers that are making the sandbox
 // will be started.
 func (s *Sandbox) Start() error {
-	if err := s.state.validTransition(s.state.State, StateRunning); err != nil {
+
+	//FC-HACKING: In the event that we are using a hypervisor that uses cold plug,
+	// this is the time in which the actual virtual machine will be started.
+	hypervisorCaps := s.hypervisor.capabilities()
+
+	var err error
+
+	if !hypervisorCaps.isHotplugSupported() {
+		//send action command to firecracker to start VM
+
+		//wait for agent to come up, and create the actual sandbox and containers
+		if err = s.agent.startSandbox(s); err != nil {
+			return err
+		}
+		// rollback to stop sandbox in VM
+		defer func() {
+			if err != nil {
+				s.agent.stopSandbox(s)
+			}
+		}()
+		if err = s.getAndStoreGuestDetails(); err != nil {
+			return err
+		}
+
+		//create the containers:
+		//TODO
+	}
+
+	if err = s.state.validTransition(s.state.State, StateRunning); err != nil {
 		return err
 	}
 
-	if err := s.setSandboxState(StateRunning); err != nil {
+	if err = s.setSandboxState(StateRunning); err != nil {
 		return err
 	}
 
 	for _, c := range s.containers {
-		if err := c.start(); err != nil {
+		if err = c.start(); err != nil {
 			return err
 		}
 	}
