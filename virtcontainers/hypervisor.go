@@ -284,6 +284,10 @@ func (conf *HypervisorConfig) checkTemplateConfig() error {
 	return nil
 }
 
+//
+// FC-hacking TODO: this function is very QEMU specific, and should be
+// moved elsewhere.
+//
 func (conf *HypervisorConfig) valid() error {
 	if conf.KernelPath == "" {
 		return fmt.Errorf("Missing kernel path")
