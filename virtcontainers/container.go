@@ -613,6 +613,8 @@ func newContainer(sandbox *Sandbox, contConfig ContainerConfig) (*Container, err
 			// instead of passing this as a shared mount.
 			if c.checkBlockDeviceSupport() && stat.Mode&unix.S_IFBLK == unix.S_IFBLK {
 
+				//TODO: need to checkout if we need to explicitly check for hotplug here.  In non-hotplug
+				//scenarios, this *may* still be the correct flow.  Review this for FC.
 				hypervisorCaps := c.sandbox.hypervisor.capabilities()
 				if hypervisorCaps.isBlockDeviceHotplugSupported() {
 
