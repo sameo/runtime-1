@@ -612,18 +612,23 @@ func newContainer(sandbox *Sandbox, contConfig ContainerConfig) (*Container, err
 			// Check if mount is a block device file. If it is, the block device will be attached to the host
 			// instead of passing this as a shared mount.
 			if c.checkBlockDeviceSupport() && stat.Mode&unix.S_IFBLK == unix.S_IFBLK {
-				b, err := c.sandbox.devManager.NewDevice(config.DeviceInfo{
-					HostPath:      m.Source,
-					ContainerPath: m.Destination,
-					DevType:       "b",
-					Major:         int64(unix.Major(stat.Rdev)),
-					Minor:         int64(unix.Minor(stat.Rdev)),
-				})
-				if err != nil {
-					return nil, fmt.Errorf("device manager failed to create new device for %q: %v", m.Source, err)
-				}
 
-				c.mounts[i].BlockDeviceID = b.DeviceID()
+				hypervisorCaps := c.sandbox.hypervisor.capabilities()
+				if hypervisorCaps.isBlockDeviceHotplugSupported() {
+
+					b, err := c.sandbox.devManager.NewDevice(config.DeviceInfo{
+						HostPath:      m.Source,
+						ContainerPath: m.Destination,
+						DevType:       "b",
+						Major:         int64(unix.Major(stat.Rdev)),
+						Minor:         int64(unix.Minor(stat.Rdev)),
+					})
+					if err != nil {
+						return nil, fmt.Errorf("device manager failed to create new device for %q: %v", m.Source, err)
+					}
+
+					c.mounts[i].BlockDeviceID = b.DeviceID()
+				}
 			}
 		}
 	}
@@ -669,12 +674,13 @@ func (c *Container) rollbackFailingContainerCreation() {
 	}
 }
 
+// checkBlockDeviceSupport returns true if the hypervisor has block devie usage enabled
+// and the agent supports block devices.
 func (c *Container) checkBlockDeviceSupport() bool {
 	if !c.sandbox.config.HypervisorConfig.DisableBlockDeviceUse {
 		agentCaps := c.sandbox.agent.capabilities()
-		hypervisorCaps := c.sandbox.hypervisor.capabilities()
 
-		if agentCaps.isBlockDeviceSupported() && hypervisorCaps.isBlockDeviceHotplugSupported() {
+		if agentCaps.isBlockDeviceSupported() {
 			return true
 		}
 	}
@@ -707,8 +713,13 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 	}()
 
 	if c.checkBlockDeviceSupport() {
-		if err = c.hotplugDrive(); err != nil {
-			return
+		hypervisorCaps := c.sandbox.hypervisor.capabilities()
+		if hypervisorCaps.isBlockDeviceHotplugSupported() {
+			if err = c.hotplugDrive(); err != nil {
+				return
+			}
+		} else {
+			//TODO: coldplug path for block.
 		}
 	}
 
