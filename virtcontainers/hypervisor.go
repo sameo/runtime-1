@@ -24,6 +24,9 @@ const (
 	// QemuHypervisor is the QEMU hypervisor.
 	QemuHypervisor HypervisorType = "qemu"
 
+	// FirecrackerHypervisor is the firecracker hypervisor.
+	FirecrackerHypervisor HypervisorType = "firecracker"
+
 	// MockHypervisor is a mock hypervisor for testing purposes
 	MockHypervisor HypervisorType = "mock"
 )
@@ -118,11 +121,13 @@ func (hType *HypervisorType) String() string {
 	}
 }
 
-// newHypervisor returns an hypervisor from and hypervisor type.
+// newHypervisor returns a new hypervisor  type.
 func newHypervisor(hType HypervisorType) (hypervisor, error) {
 	switch hType {
 	case QemuHypervisor:
 		return &qemu{}, nil
+	case FirecrackerHypervisor:
+		return &firecracker{}, nil
 	case MockHypervisor:
 		return &mockHypervisor{}, nil
 	default:
