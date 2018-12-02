@@ -98,22 +98,28 @@ func createSandboxFromConfig(ctx context.Context, sandboxConfig SandboxConfig, f
 		}
 	}()
 
-	// Once startVM is done, we want to guarantee
-	// that the sandbox is manageable. For that we need
-	// to start the sandbox inside the VM.
-	if err = s.agent.startSandbox(s); err != nil {
-		return nil, err
-	}
+	hypervisorCaps := s.hypervisor.capabilities()
 
-	// rollback to stop sandbox in VM
-	defer func() {
-		if err != nil {
-			s.agent.stopSandbox(s)
+	//In the event that hotplug is supported, go ahead and start the agent sandbox
+	// and create the containers.
+	if hypervisorCaps.isHotplugSupported() {
+		// Once startVM is done, we want to guarantee
+		// that the sandbox is manageable. For that we need
+		// to start the sandbox inside the VM.
+		if err = s.agent.startSandbox(s); err != nil {
+			return nil, err
 		}
-	}()
 
-	if err := s.getAndStoreGuestDetails(); err != nil {
-		return nil, err
+		// rollback to stop sandbox in VM
+		defer func() {
+			if err != nil {
+				s.agent.stopSandbox(s)
+			}
+		}()
+
+		if err := s.getAndStoreGuestDetails(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create Containers
