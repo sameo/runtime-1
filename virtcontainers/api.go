@@ -86,12 +86,12 @@ func createSandboxFromConfig(ctx context.Context, sandboxConfig SandboxConfig, f
 		}
 	}()
 
-	// Start the VM
-	if err = s.startVM(); err != nil {
+	// Start the hypervisor.
+	if err = s.startHypervisor(); err != nil {
 		return nil, err
 	}
 
-	// rollback to stop VM if error occurs
+	// rollback to stop the hypervisor if an error occurs
 	defer func() {
 		if err != nil {
 			s.stopVM()

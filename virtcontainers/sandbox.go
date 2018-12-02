@@ -1175,12 +1175,12 @@ func (s *Sandbox) ListRoutes() ([]*types.Route, error) {
 	return s.agent.listRoutes()
 }
 
-// startVM starts the VM.
-func (s *Sandbox) startVM() error {
-	span, ctx := s.trace("startVM")
+// startHypervisor starts the hypervisor
+func (s *Sandbox) startHypervisor() error {
+	span, ctx := s.trace("startHypervisor")
 	defer span.Finish()
 
-	s.Logger().Info("Starting VM")
+	s.Logger().Info("Starting hypervisor")
 
 	if err := s.network.run(s.networkNS.NetNsPath, func() error {
 		if s.factory != nil {
@@ -1228,8 +1228,7 @@ func (s *Sandbox) startVM() error {
 		}
 	}
 
-	// Store the network
-	s.Logger().Info("VM started")
+	s.Logger().Info("Hypervisor started")
 
 	return nil
 }
