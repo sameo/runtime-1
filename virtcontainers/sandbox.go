@@ -573,6 +573,11 @@ func (s *Sandbox) GetContainer(containerID string) VCContainer {
 	return nil
 }
 
+// TODO: FC-hacking: This has an assumption that the virtual machine (not just
+// the hypervisor) and that the agent in the VM are already started at sandbox
+// creation time.  This won't be the case in firecracker.  We may want to keep
+// track of the state of the agent and noop if it isn't started?
+//
 // Release closes the agent connection and removes sandbox from internal list.
 func (s *Sandbox) Release() error {
 	s.Logger().Info("release sandbox")
@@ -743,8 +748,9 @@ func (s *Sandbox) getAndStoreGuestDetails() error {
 // createSandbox creates a sandbox from a sandbox description, the containers list, the hypervisor
 // and the agent passed through the Config structure.
 // It will create and store the sandbox structure, and then ask the hypervisor
-// to physically create that sandbox i.e. starts a VM for that sandbox to eventually
-// be started.
+// to create that sandbox.  This will start a hypervisor which will manage the VM the sandbox
+// will ultimately be run in.  Depending on the hypervisor, this may just start creation of the VM rather
+// than actually running the VM.
 func createSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factory) (*Sandbox, error) {
 	span, ctx := trace(ctx, "createSandbox")
 	defer span.Finish()
@@ -1485,6 +1491,17 @@ func (s *Sandbox) ResumeContainer(containerID string) error {
 	// Resume the container.
 	return c.resume()
 }
+
+// TODO: fc-hacking: The comment below is too specific, and further, it is
+// also not accurate with respect to proxy.
+//
+// for firecracker support, we'll need to seperate out "gathering container
+// details" from working with the agent to create it in the virtual machine.
+//  When this is called from Create (sandboX) flow for firecracker, we just
+// want to learn the CPU, memory, rootfs details for the container so we can
+// send these over rest API to the hypervisor itself.  The VM is not  yet booted.
+// the actual in-guest container creation will need to be done at start of OCI Start
+// flow.
 
 // createContainers registers all containers to the proxy, create the
 // containers in the guest and starts one shim per container.
