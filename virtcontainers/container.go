@@ -769,7 +769,11 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 		}
 		c.process = *process
 	} else {
-		//TODO: implement FC friendly agent handling
+		err := sandbox.agent.prepareContainerFC(c.sandbox, c)
+		if err != nil {
+			return nil, err
+		}
+		//TODO: c.process = process-of-firecracker?
 	}
 
 	// If this is a sandbox container, store the pid for sandbox

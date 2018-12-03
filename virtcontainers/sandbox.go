@@ -1550,8 +1550,14 @@ func (s *Sandbox) Start() error {
 			return err
 		}
 
-		//create the containers:
-		//TODO
+		// Create the actual workload inside the guest
+		for _, c := range s.containers {
+			process, err := s.agent.createContainerFC(s, c)
+			if err != nil {
+				return err
+			}
+			c.process = *process
+		}
 	}
 
 	if err = s.state.validTransition(s.state.State, StateRunning); err != nil {
