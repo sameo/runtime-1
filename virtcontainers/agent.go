@@ -167,6 +167,13 @@ type agent interface {
 	// createContainer will tell the agent to create a container related to a Sandbox.
 	createContainer(sandbox *Sandbox, c *Container) (*Process, error)
 
+	// prepareContainerFC will prepare structures, but not actually work with the agent.
+	prepareContainerFC(sandbox *Sandbox, c *Container) error
+
+	// createContainerFC will finish creation of the containers, communicating with the agent.
+	//This along with prepareContainerFC should implement the overall flow of createContainer.
+	createContainerFC(sandbox *Sandbox, c *Container) (*Process, error)
+
 	// startContainer will tell the agent to start a container related to a Sandbox.
 	startContainer(sandbox *Sandbox, c *Container) error
 

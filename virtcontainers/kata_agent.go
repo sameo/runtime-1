@@ -1019,6 +1019,13 @@ func (k *kataAgent) createContainer(sandbox *Sandbox, c *Container) (p *Process,
 		k.state.URL, c.config.Cmd, createNSList, enterNSList)
 }
 
+func (k *kataAgent) prepareContainerFC(sandbox *Sandbox, c *Container) (err error) {
+	return nil
+}
+func (k *kataAgent) createContainerFC(sandbox *Sandbox, c *Container) (p *Process, err error) {
+	return &Process{}, nil
+}
+
 // handleEphemeralStorage handles ephemeral storages by
 // creating a Storage from corresponding source of the mount point
 func (k *kataAgent) handleEphemeralStorage(mounts []specs.Mount) []*grpc.Storage {
