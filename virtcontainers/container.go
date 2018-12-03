@@ -735,6 +735,9 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 		return
 	}
 
+	// Add CPU and Memory per container request
+	// FC-HACKING: TODO: as is this will interact with the agent and
+	//  online CPUs/Memory.  Will need to be adjusted
 	if err = c.addResources(); err != nil {
 		return
 	}
