@@ -716,8 +716,9 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 		}
 	}()
 
+	hypervisorCaps := c.sandbox.hypervisor.capabilities()
+
 	if c.checkBlockDeviceSupport() {
-		hypervisorCaps := c.sandbox.hypervisor.capabilities()
 		if hypervisorCaps.isBlockDeviceHotplugSupported() {
 			if err = c.hotplugDrive(); err != nil {
 				return
@@ -737,9 +738,17 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 
 	// Add CPU and Memory per container request
 	// FC-HACKING: TODO: as is this will interact with the agent and
-	//  online CPUs/Memory.  Will need to be adjusted
-	if err = c.addResources(); err != nil {
-		return
+	//  online CPUs/Memory.  Will need to be adjusted.
+	// Note: I am definitely blatently abusing the isHotplugSupported
+	// flag; really this should read "is Eric hacking FC in?"
+	if hypervisorCaps.isHotplugSupported() {
+		if err = c.addResources(); err != nil {
+			return
+		}
+	} else {
+		if err = c.addResourcesFC(); err != nil {
+			return
+		}
 	}
 
 	// Deduce additional system mount info that should be handled by the agent
@@ -750,11 +759,18 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 		return
 	}
 
-	process, err := sandbox.agent.createContainer(c.sandbox, c)
-	if err != nil {
-		return c, err
+	// FC-hacking: TODO: needs adjustment: agent may not be available at this time
+	// in case we are hacking on FC, we can grab the PID of the hypervisor itself since
+	// we won't have the container POD until later
+	if hypervisorCaps.isHotplugSupported() {
+		process, err := sandbox.agent.createContainer(c.sandbox, c)
+		if err != nil {
+			return c, err
+		}
+		c.process = *process
+	} else {
+		//TODO: implement FC friendly agent handling
 	}
-	c.process = *process
 
 	// If this is a sandbox container, store the pid for sandbox
 	ann := c.GetAnnotations()
@@ -1304,6 +1320,13 @@ func (c *Container) detachDevices() error {
 	if err := c.sandbox.storeSandboxDevices(); err != nil {
 		return err
 	}
+	return nil
+}
+
+//FC-HACKING: Our needs are simpler: just configure firecracker, as the
+// agent isn't going to be up at this point.  This only works for single container
+// pods...
+func (c *Container) addResourcesFC() error {
 	return nil
 }
 
