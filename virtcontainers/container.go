@@ -723,7 +723,10 @@ func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container
 				return
 			}
 		} else {
-			//TODO: coldplug path for block.
+			//coldplug path for block.
+			if err = c.coldplugDrive(); err != nil {
+				return
+			}
 		}
 	}
 
