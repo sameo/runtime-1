@@ -391,6 +391,7 @@ func (fc *firecracker) capabilities() capabilities {
 	defer span.Finish()
 	var caps capabilities
 	caps.set9pUnsupported()
+	caps.setHotplugUnsupported()
 
 	return caps
 }
