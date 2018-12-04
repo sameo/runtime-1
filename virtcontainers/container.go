@@ -693,6 +693,9 @@ func (c *Container) checkBlockDeviceSupport() bool {
 // called only when a new container, not known by the sandbox, has to be created.
 func createContainer(sandbox *Sandbox, contConfig ContainerConfig) (c *Container, err error) {
 
+	span, _ := sandbox.trace("createContainer")
+	defer span.Finish()
+
 	//make sure we have a sandbox configuration available
 	if sandbox == nil {
 		return nil, errNeedSandbox

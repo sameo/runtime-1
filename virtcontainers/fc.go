@@ -98,7 +98,9 @@ func (fc *firecracker) createSandbox() error {
 	return nil
 }
 
-func newFireClient(socketPath string) *client.Firecracker {
+func (fc *firecracker) newFireClient(socketPath string) *client.Firecracker {
+	span, _ := fc.trace("newFireClient")
+	defer span.Finish()
 	httpClient := client.NewHTTPClient(strfmt.NewFormats())
 
 	socketTransport := &http.Transport{
@@ -121,6 +123,8 @@ func newFireClient(socketPath string) *client.Firecracker {
 }
 
 func (fc *firecracker) fcInit(fcSocket string) error {
+	span, _ := fc.trace("fcInit")
+	defer span.Finish()
 	fc.Logger().WithField("VM socket:", fcSocket).Debug()
 	fireCracker := "/usr/bin/firecracker"
 	args := []string{"--api-sock", "/tmp/" + fcSocket}
@@ -133,7 +137,7 @@ func (fc *firecracker) fcInit(fcSocket string) error {
 	}
 
 	fc.firecrackerd = cmd
-	fc.client = newFireClient("/tmp/" + fcSocket)
+	fc.client = fc.newFireClient("/tmp/" + fcSocket)
 
 	vsockParams := ops.NewPutGuestVsockByIDParams()
 	vsockID := "root"
@@ -192,6 +196,30 @@ func (fc *firecracker) fcSetVMRootfs(path string) error {
 	}
 
 	return nil
+}
+func (fc *firecracker) fcStartVM() error {
+	fc.Logger().Info("start firecracker virtual machine")
+	span, _ := fc.trace("fcStartVM")
+	defer span.Finish()
+
+	fc.Logger().Info("Starting VM")
+
+	actionParams := ops.NewCreateSyncActionParams()
+	actionInfo := &models.InstanceActionInfo{
+		ActionType: "InstanceStart",
+	}
+	actionParams.SetInfo(actionInfo)
+	_, err := fc.client.Operations.CreateSyncAction(actionParams)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	return nil
+}
+
+func (fc *firecracker) startSandbox2() error {
+	return fc.fcStartVM()
 }
 
 // startSandbox will start the hypervisor for the given sandbox.

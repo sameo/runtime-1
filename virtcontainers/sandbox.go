@@ -1535,6 +1535,9 @@ func (s *Sandbox) Start() error {
 
 	if !hypervisorCaps.isHotplugSupported() {
 		//send action command to firecracker to start VM
+		if err = s.hypervisor.startSandbox2(); err != nil {
+			return err
+		}
 
 		//wait for agent to come up, and create the actual sandbox and containers
 		if err = s.agent.startSandbox(s); err != nil {

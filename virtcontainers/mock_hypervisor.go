@@ -34,6 +34,10 @@ func (m *mockHypervisor) createSandbox() error {
 	return nil
 }
 
+func (m *mockHypervisor) startSandbox2() error {
+	return nil
+}
+
 func (m *mockHypervisor) startSandbox() error {
 	return nil
 }

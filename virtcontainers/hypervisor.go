@@ -577,6 +577,7 @@ type hypervisor interface {
 
 	createSandbox() error
 	startSandbox() error
+	startSandbox2() error
 	waitSandbox(timeout int) error
 	stopSandbox() error
 	pauseSandbox() error

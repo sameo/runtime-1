@@ -72,6 +72,9 @@ func (s *Sandbox) destroyCgroups() error {
 }
 
 func (s *Sandbox) setupCgroups() error {
+	span, _ := s.trace("setupCgroups")
+	defer span.Finish()
+
 	if s.cgroup == nil {
 		return fmt.Errorf("failed to setup uninitialized cgroup for sandbox")
 	}

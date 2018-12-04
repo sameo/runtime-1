@@ -509,6 +509,10 @@ func (q *qemu) createSandbox() error {
 	return nil
 }
 
+func (q *qemu) startSandbox2() error {
+	return nil
+}
+
 // startSandbox will start the Sandbox's VM.
 func (q *qemu) startSandbox() error {
 	span, _ := q.trace("startSandbox")
