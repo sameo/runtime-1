@@ -149,13 +149,15 @@ func (fc *firecracker) fcInit(fcSocket string) error {
 	vsockParams.SetBody(vsock)
 	_, _, err = fc.client.Operations.PutGuestVsockByID(vsockParams)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("fcInit failed:", err).Debug()
 		return err
 	}
 	return nil
 }
 
 func (fc *firecracker) fcSetBootSource(path, params string) error {
+	span, _ := fc.trace("fcSetBootSource")
+	defer span.Finish()
 	fc.Logger().WithField("kernel path:", path).Debug()
 	fc.Logger().WithField("kernel params:", params).Debug()
 
@@ -168,13 +170,15 @@ func (fc *firecracker) fcSetBootSource(path, params string) error {
 
 	_, err := fc.client.Operations.PutGuestBootSource(bootSrcParams)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("fcSetBootSource failed:", err).Debug()
 		return err
 	}
 
 	return nil
 }
 func (fc *firecracker) fcSetVMRootfs(path string) error {
+	span, _ := fc.trace("fcSetVMRootfs")
+	defer span.Finish()
 	fc.Logger().WithField("VM rootfs path:", path).Debug()
 
 	driveID := "rootfs"
@@ -191,7 +195,7 @@ func (fc *firecracker) fcSetVMRootfs(path string) error {
 	driveParams.SetBody(drive)
 	_, err := fc.client.Operations.PutGuestDriveByID(driveParams)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("fcSetVMRootfs failed:", err).Debug()
 		return err
 	}
 
@@ -211,7 +215,7 @@ func (fc *firecracker) fcStartVM() error {
 	actionParams.SetInfo(actionInfo)
 	_, err := fc.client.Operations.CreateSyncAction(actionParams)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("start firecracker virtual machine failed:", err).Debug()
 		return err
 	}
 
@@ -282,7 +286,7 @@ func (fc *firecracker) waitSandbox(timeout int) error {
 		// instance-info, using fc.id as a way to identify the socket?
 		//
 		_, err := fc.client.Operations.DescribeInstance(nil)
-		if err != nil {
+		if err == nil {
 			return nil
 		}
 
@@ -309,7 +313,7 @@ func (fc *firecracker) stopSandbox() error {
 	actionParams.SetInfo(actionInfo)
 	_, err := fc.client.Operations.CreateSyncAction(actionParams)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("stopSandbox failed:", err).Debug()
 		return err
 	}
 
@@ -342,7 +346,7 @@ func (fc *firecracker) fcAddNetDevice(endpoint Endpoint) error {
 	cfg.SetIfaceID(ifaceID)
 	_, err := fc.client.Operations.PutGuestNetworkInterfaceByID(cfg)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("fcAddNetDevice failed:", err).Debug()
 		return err
 	}
 
@@ -354,7 +358,7 @@ func (fc *firecracker) fcAddBlockDrive(drive config.BlockDrive) error {
 	driveParams := ops.NewPutGuestDriveByIDParams()
 	driveParams.SetDriveID(driveID)
 	isReadOnly := false
-	isRootDevice := true
+	isRootDevice := false //TODO: Check what root device means
 	driveFc := &models.Drive{
 		DriveID:      &driveID,
 		IsReadOnly:   &isReadOnly,
@@ -364,7 +368,7 @@ func (fc *firecracker) fcAddBlockDrive(drive config.BlockDrive) error {
 	driveParams.SetBody(driveFc)
 	_, err := fc.client.Operations.PutGuestDriveByID(driveParams)
 	if err != nil {
-		fmt.Println(err)
+		fc.Logger().WithField("fcAddBlockDrive failed:", err).Debug()
 		return err
 	}
 
