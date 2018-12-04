@@ -8,7 +8,9 @@ package virtcontainers
 import (
 	"context"
 	"fmt"
-	//"os"
+	"os"
+	"os/exec"
+
 	//"path/filepath"
 	//"strconv"
 	"strings"
@@ -20,11 +22,25 @@ import (
 
 	"github.com/kata-containers/runtime/virtcontainers/device/config"
 	//"github.com/kata-containers/runtime/virtcontainers/utils"
+
+	"net"
+	"net/http"
+
+	"github.com/go-openapi/strfmt"
+
+	httptransport "github.com/go-openapi/runtime/client"
+	"github.com/kata-containers/runtime/virtcontainers/pkg/fireclient/client"
+	models "github.com/kata-containers/runtime/virtcontainers/pkg/fireclient/client/models"
+	ops "github.com/kata-containers/runtime/virtcontainers/pkg/fireclient/client/operations"
 )
 
 // firecracker is an Hypervisor interface implementation for the firecracker hypervisor.
 type firecracker struct {
 	id string
+
+	firecrackerd *exec.Cmd           //Tracks the firecracker process itself
+	client       *client.Firecracker //Tracks the current active connection
+	guestCid     int
 
 	storage resourceStorage
 
@@ -67,6 +83,7 @@ func (fc *firecracker) init(ctx context.Context, id string, hypervisorConfig *Hy
 	//todo: check validity of the hypervisor config provided
 
 	fc.id = id
+	fc.guestCid = 3 //TODO: Find an unique value per VM
 	fc.storage = storage
 	fc.config = *hypervisorConfig
 
@@ -81,26 +98,98 @@ func (fc *firecracker) createSandbox() error {
 	return nil
 }
 
+func newFireClient(socketPath string) *client.Firecracker {
+	httpClient := client.NewHTTPClient(strfmt.NewFormats())
+
+	socketTransport := &http.Transport{
+		DialContext: func(ctx context.Context, network, path string) (net.Conn, error) {
+			addr, err := net.ResolveUnixAddr("unix", socketPath)
+			if err != nil {
+				return nil, err
+			}
+
+			return net.DialUnix("unix", nil, addr)
+		},
+	}
+
+	transport := httptransport.New(client.DefaultHost, client.DefaultBasePath, client.DefaultSchemes)
+	transport.Transport = socketTransport
+
+	httpClient.SetTransport(transport)
+
+	return httpClient
+}
+
+func (fc *firecracker) fcInit(fcSocket string) error {
+	fc.Logger().WithField("VM socket:", fcSocket).Debug()
+	fireCracker := "/usr/bin/firecracker"
+	args := []string{"--api-sock", "/tmp/" + fcSocket}
+
+	cmd := exec.Command(fireCracker, args...)
+	err := cmd.Start()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error starting firecracker", err)
+		os.Exit(1)
+	}
+
+	fc.firecrackerd = cmd
+	fc.client = newFireClient("/tmp/" + fcSocket)
+
+	vsockParams := ops.NewPutGuestVsockByIDParams()
+	vsockID := "root"
+	vsock := &models.Vsock{
+		GuestCid: 3,
+		ID:       &vsockID,
+	}
+	vsockParams.SetID(vsockID)
+	vsockParams.SetBody(vsock)
+	_, _, err = fc.client.Operations.PutGuestVsockByID(vsockParams)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	return nil
+}
+
 func (fc *firecracker) fcSetBootSource(path, params string) error {
 	fc.Logger().WithField("kernel path:", path).Debug()
 	fc.Logger().WithField("kernel params:", params).Debug()
 
-	//
-	// call rest API here
-	//
+	bootSrcParams := ops.NewPutGuestBootSourceParams()
+	src := &models.BootSource{
+		KernelImagePath: &path,
+		BootArgs:        params,
+	}
+	bootSrcParams.SetBody(src)
+
+	_, err := fc.client.Operations.PutGuestBootSource(bootSrcParams)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 
 	return nil
 }
 func (fc *firecracker) fcSetVMRootfs(path string) error {
 	fc.Logger().WithField("VM rootfs path:", path).Debug()
 
-	//var ro string
-	//var root string
-	//var drive_id string
-
-	//
-	// call rest API here
-	//
+	driveID := "rootfs"
+	driveParams := ops.NewPutGuestDriveByIDParams()
+	driveParams.SetDriveID(driveID)
+	isReadOnly := false
+	isRootDevice := true
+	drive := &models.Drive{
+		DriveID:      &driveID,
+		IsReadOnly:   &isReadOnly,
+		IsRootDevice: &isRootDevice,
+		PathOnHost:   &path,
+	}
+	driveParams.SetBody(drive)
+	_, err := fc.client.Operations.PutGuestDriveByID(driveParams)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 
 	return nil
 }
@@ -115,8 +204,7 @@ func (fc *firecracker) startSandbox() error {
 	//
 	// call script to start firecracker process with a unique name
 	//  provided by fc.id ? I hope that is unique...
-
-	//
+	fc.fcInit(fc.id)
 
 	kernelPath, err := fc.config.KernelAssetPath()
 	if err != nil {
@@ -155,7 +243,6 @@ func (fc *firecracker) waitSandbox(timeout int) error {
 		return fmt.Errorf("Invalid timeout %ds", timeout)
 	}
 
-	var err error
 	timeStart := time.Now()
 	for {
 		//
@@ -166,6 +253,10 @@ func (fc *firecracker) waitSandbox(timeout int) error {
 		// TODO call script to check on the firecracker instance, calling
 		// instance-info, using fc.id as a way to identify the socket?
 		//
+		_, err := fc.client.Operations.DescribeInstance(nil)
+		if err != nil {
+			return nil
+		}
 
 		if int(time.Now().Sub(timeStart).Seconds()) > timeout {
 			return fmt.Errorf("Failed to connect to firecrackerinstance (timeout %ds): %v", timeout, err)
@@ -182,6 +273,17 @@ func (fc *firecracker) stopSandbox() error {
 	defer span.Finish()
 
 	fc.Logger().Info("Stopping Sandbox")
+
+	actionParams := ops.NewCreateSyncActionParams()
+	actionInfo := &models.InstanceActionInfo{
+		ActionType: "InstanceHalt",
+	}
+	actionParams.SetInfo(actionInfo)
+	_, err := fc.client.Operations.CreateSyncAction(actionParams)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 
 	return nil
 }
@@ -211,14 +313,23 @@ func (fc *firecracker) fcAddNetDevice(endpoint Endpoint) error {
 }
 
 func (fc *firecracker) fcAddBlockDrive(drive config.BlockDrive) error {
-	//drive_id := config.BlockDrive.ID
-	//path_on_host := config.BlockDrive.File
-	//is_root_device := false
-	//is_read_only := false
-
-	//
-	// call rest API
-	//
+	driveID := drive.ID
+	driveParams := ops.NewPutGuestDriveByIDParams()
+	driveParams.SetDriveID(driveID)
+	isReadOnly := false
+	isRootDevice := true
+	driveFc := &models.Drive{
+		DriveID:      &driveID,
+		IsReadOnly:   &isReadOnly,
+		IsRootDevice: &isRootDevice,
+		PathOnHost:   &drive.File,
+	}
+	driveParams.SetBody(driveFc)
+	_, err := fc.client.Operations.PutGuestDriveByID(driveParams)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 
 	return nil
 }
