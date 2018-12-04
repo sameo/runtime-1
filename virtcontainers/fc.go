@@ -301,13 +301,22 @@ func (fc *firecracker) resumeSandbox() error {
 }
 
 func (fc *firecracker) fcAddNetDevice(endpoint Endpoint) error {
-	//guest_mac := endpoint.HardwareAddr()
-	//iface_id := endpoint.Name()
-	//host_dev_name := iface_id
-
-	//
-	// call rest API: {iface_id, guest_mac (endpoint.HardwareAddr(), host_dev_name(?)
-	//
+	cfg := ops.NewPutGuestNetworkInterfaceByIDParams()
+	ifaceID := endpoint.Name()
+	ifaceCfg := &models.NetworkInterface{
+		AllowMmdsRequests: false,
+		GuestMac:          endpoint.HardwareAddr(),
+		IfaceID:           &ifaceID,
+		HostDevName:       endpoint.Name(),
+		State:             "Attached",
+	}
+	cfg.SetBody(ifaceCfg)
+	cfg.SetIfaceID(ifaceID)
+	_, err := fc.client.Operations.PutGuestNetworkInterfaceByID(cfg)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 
 	return nil
 }
