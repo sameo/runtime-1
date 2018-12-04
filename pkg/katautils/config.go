@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultHypervisor = vc.QemuHypervisor
+	defaultHypervisor = vc.FirecrackerHypervisor
 	defaultAgent      = vc.KataContainersAgent
 )
 
@@ -46,7 +46,8 @@ var (
 // The currently supported types are listed below:
 const (
 	// supported hypervisor component types
-	qemuHypervisorTableType = "qemu"
+	firecrackerHypervisorTableType = "firecracker"
+	qemuHypervisorTableType        = "qemu"
 
 	// supported proxy component types
 	ccProxyTableType   = "cc"
@@ -360,6 +361,91 @@ func (n netmon) debug() bool {
 	return n.Debug
 }
 
+func newFirecrackerHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
+	hypervisor, err := h.path()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	kernel, err := h.kernel()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	initrd, err := h.initrd()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	image, err := h.image()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	if image != "" && initrd != "" {
+		return vc.HypervisorConfig{},
+			errors.New("having both an image and an initrd defined in the configuration file is not supported")
+	}
+
+	if image == "" && initrd == "" {
+		return vc.HypervisorConfig{},
+			errors.New("either image or initrd must be defined in the configuration file")
+	}
+
+	firmware, err := h.firmware()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	machineAccelerators := h.machineAccelerators()
+	kernelParams := h.kernelParams()
+	machineType := h.machineType()
+
+	blockDriver, err := h.blockDeviceDriver()
+	if err != nil {
+		return vc.HypervisorConfig{}, err
+	}
+
+	useVSock := false
+	if h.useVSock() {
+		if utils.SupportsVsocks() {
+			kataUtilsLogger.Info("vsock supported")
+			useVSock = true
+		} else {
+			kataUtilsLogger.Warn("No vsock support, falling back to legacy serial port")
+		}
+	}
+
+	return vc.HypervisorConfig{
+		HypervisorPath:        hypervisor,
+		KernelPath:            kernel,
+		InitrdPath:            initrd,
+		ImagePath:             image,
+		FirmwarePath:          firmware,
+		MachineAccelerators:   machineAccelerators,
+		KernelParams:          vc.DeserializeParams(strings.Fields(kernelParams)),
+		HypervisorMachineType: machineType,
+		NumVCPUs:              h.defaultVCPUs(),
+		DefaultMaxVCPUs:       h.defaultMaxVCPUs(),
+		MemorySize:            h.defaultMemSz(),
+		MemSlots:              h.defaultMemSlots(),
+		EntropySource:         h.GetEntropySource(),
+		DefaultBridges:        h.defaultBridges(),
+		DisableBlockDeviceUse: h.DisableBlockDeviceUse,
+		MemPrealloc:           h.MemPrealloc,
+		HugePages:             h.HugePages,
+		Mlock:                 !h.Swap,
+		Debug:                 h.Debug,
+		DisableNestingChecks:  h.DisableNestingChecks,
+		BlockDeviceDriver:     blockDriver,
+		EnableIOThreads:       h.EnableIOThreads,
+		Msize9p:               h.msize9p(),
+		UseVSock:              useVSock,
+		HotplugVFIOOnRootBus:  h.HotplugVFIOOnRootBus,
+		DisableVhostNet:       h.DisableVhostNet,
+		GuestHookPath:         h.guestHookPath(),
+	}, nil
+}
 func newQemuHypervisorConfig(h hypervisor) (vc.HypervisorConfig, error) {
 	hypervisor, err := h.path()
 	if err != nil {
@@ -465,7 +551,14 @@ func newShimConfig(s shim) (vc.ShimConfig, error) {
 func updateRuntimeConfig(configPath string, tomlConf tomlConfig, config *oci.RuntimeConfig) error {
 	for k, hypervisor := range tomlConf.Hypervisor {
 		switch k {
-		case qemuHypervisorTableType:
+		case firecrackerHypervisorTableType:
+			hConfig, err := newFirecrackerHypervisorConfig(hypervisor)
+			if err != nil {
+				return fmt.Errorf("%v: %v", configPath, err)
+			}
+
+			config.HypervisorConfig = hConfig
+		case nemuHypervisorTableType, qemuHypervisorTableType:
 			hConfig, err := newQemuHypervisorConfig(hypervisor)
 			if err != nil {
 				return fmt.Errorf("%v: %v", configPath, err)

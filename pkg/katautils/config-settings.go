@@ -8,9 +8,9 @@
 
 package katautils
 
-var defaultHypervisorPath = "/usr/bin/qemu-lite-system-x86_64"
+var defaultHypervisorPath = "/usr/bin/firecracker"
 var defaultImagePath = "/usr/share/kata-containers/kata-containers.img"
-var defaultKernelPath = "/usr/share/kata-containers/vmlinuz.container"
+var defaultKernelPath = "/usr/share/kata-containers/vmlinux"
 var defaultInitrdPath = "/usr/share/kata-containers/kata-containers-initrd.img"
 var defaultFirmwarePath = ""
 var defaultMachineAccelerators = ""
