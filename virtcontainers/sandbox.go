@@ -586,6 +586,7 @@ func (s *Sandbox) Release() error {
 		s.monitor.stop()
 	}
 	s.hypervisor.disconnect()
+	//TODO: release is called at end of create - double check this won't cause issue for FC
 	return s.agent.disconnect()
 }
 
