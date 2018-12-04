@@ -47,6 +47,7 @@ var (
 const (
 	// supported hypervisor component types
 	firecrackerHypervisorTableType = "firecracker"
+	nemuHypervisorTableType        = "nemu"
 	qemuHypervisorTableType        = "qemu"
 
 	// supported proxy component types
