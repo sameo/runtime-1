@@ -1060,117 +1060,119 @@ func (k *kataAgent) createContainer(sandbox *Sandbox, c *Container) (p *Process,
 func (k *kataAgent) prepareContainerFC(sandbox *Sandbox, c *Container) (err error) {
 	span, _ := k.trace("prepareContainerFC")
 	defer span.Finish()
-
-	ociSpecJSON, ok := c.config.Annotations[vcAnnotations.ConfigJSONKey]
-	if !ok {
-		return nil, errorMissingOCISpec
-	}
-
-	var ctrStorages []*grpc.Storage
-	var ctrDevices []*grpc.Device
-	var rootfs *grpc.Storage
-
-	// This is the guest absolute root path for that container.
-	rootPathParent := filepath.Join(kataGuestSharedDir, c.id)
-	rootPath := filepath.Join(rootPathParent, rootfsDir)
-
-	// In case the container creation fails, the following defer statement
-	// takes care of rolling back actions previously performed.
-	defer func() {
-		if err != nil {
-			k.rollbackFailingContainerCreation(c)
+	/*
+		ociSpecJSON, ok := c.config.Annotations[vcAnnotations.ConfigJSONKey]
+		if !ok {
+			return errorMissingOCISpec
 		}
-	}()
 
-	if rootfs, err = k.buildContainerRootfs(sandbox, c, rootPathParent); err != nil {
-		return nil, err
-	}
-	if rootfs != nil {
-		// Add rootfs to the list of container storage.
-		// We only need to do this for block based rootfs, as we
-		// want the agent to mount it into the right location
-		// (kataGuestSharedDir/ctrID/
-		ctrStorages = append(ctrStorages, rootfs)
-	}
+		var ctrStorages []*grpc.Storage
+		var ctrDevices []*grpc.Device
+		var rootfs *grpc.Storage
 
-	ociSpec := &specs.Spec{}
-	if err = json.Unmarshal([]byte(ociSpecJSON), ociSpec); err != nil {
-		return nil, err
-	}
+		// This is the guest absolute root path for that container.
+		rootPathParent := filepath.Join(kataGuestSharedDir, c.id)
+		rootPath := filepath.Join(rootPathParent, rootfsDir)
 
-	// Handle container mounts
-	newMounts, err := c.mountSharedDirMounts(kataHostSharedDir, kataGuestSharedDir)
-	if err != nil {
-		return nil, err
-	}
+		// In case the container creation fails, the following defer statement
+		// takes care of rolling back actions previously performed.
+		defer func() {
+			if err != nil {
+				k.rollbackFailingContainerCreation(c)
+			}
+		}()
 
-	epheStorages := k.handleEphemeralStorage(ociSpec.Mounts)
-	ctrStorages = append(ctrStorages, epheStorages...)
+		if rootfs, err = k.buildContainerRootfs(sandbox, c, rootPathParent); err != nil {
+			return err
+		}
+		if rootfs != nil {
+			// Add rootfs to the list of container storage.
+			// We only need to do this for block based rootfs, as we
+			// want the agent to mount it into the right location
+			// (kataGuestSharedDir/ctrID/
+			ctrStorages = append(ctrStorages, rootfs)
+		}
 
-	// We replace all OCI mount sources that match our container mount
-	// with the right source path (The guest one).
-	if err = k.replaceOCIMountSource(ociSpec, newMounts); err != nil {
-		return nil, err
-	}
+		ociSpec := &specs.Spec{}
+		if err = json.Unmarshal([]byte(ociSpecJSON), ociSpec); err != nil {
+			return err
+		}
 
-	// Append container devices for block devices passed with --device.
-	ctrDevices = k.appendDevices(ctrDevices, c)
+		// Handle container mounts
+		newMounts, err := c.mountSharedDirMounts(kataHostSharedDir, kataGuestSharedDir)
+		if err != nil {
+			return err
+		}
 
-	// Handle all the volumes that are block device files.
-	// Note this call modifies the list of container devices to make sure
-	// all hotplugged devices are unplugged, so this needs be done
-	// after devices passed with --device are handled.
-	volumeStorages := k.handleBlockVolumes(c)
-	if err := k.replaceOCIMountsForStorages(ociSpec, volumeStorages); err != nil {
-		return nil, err
-	}
+		epheStorages := k.handleEphemeralStorage(ociSpec.Mounts)
+		ctrStorages = append(ctrStorages, epheStorages...)
 
-	ctrStorages = append(ctrStorages, volumeStorages...)
+		// We replace all OCI mount sources that match our container mount
+		// with the right source path (The guest one).
+		if err = k.replaceOCIMountSource(ociSpec, newMounts); err != nil {
+			return err
+		}
 
-	grpcSpec, err := grpc.OCItoGRPC(ociSpec)
-	if err != nil {
-		return nil, err
-	}
+		// Append container devices for block devices passed with --device.
+		ctrDevices = k.appendDevices(ctrDevices, c)
 
-	// We need to give the OCI spec our absolute rootfs path in the guest.
-	grpcSpec.Root.Path = rootPath
+		// Handle all the volumes that are block device files.
+		// Note this call modifies the list of container devices to make sure
+		// all hotplugged devices are unplugged, so this needs be done
+		// after devices passed with --device are handled.
+		volumeStorages := k.handleBlockVolumes(c)
+		if err := k.replaceOCIMountsForStorages(ociSpec, volumeStorages); err != nil {
+			return err
+		}
 
-	sharedPidNs, err := k.handlePidNamespace(grpcSpec, sandbox)
-	if err != nil {
-		return nil, err
-	}
+		ctrStorages = append(ctrStorages, volumeStorages...)
 
-	// We need to constraint the spec to make sure we're not passing
-	// irrelevant information to the agent.
-	constraintGRPCSpec(grpcSpec, sandbox.config.SystemdCgroup)
+		grpcSpec, err := grpc.OCItoGRPC(ociSpec)
+		if err != nil {
+			return nil, err
+		}
 
-	k.handleShm(grpcSpec, sandbox)
+		// We need to give the OCI spec our absolute rootfs path in the guest.
+		grpcSpec.Root.Path = rootPath
 
-	req := &grpc.CreateContainerRequest{
-		ContainerId:  c.id,
-		ExecId:       c.id,
-		Storages:     ctrStorages,
-		Devices:      ctrDevices,
-		OCI:          grpcSpec,
-		SandboxPidns: sharedPidNs,
-	}
+		sharedPidNs, err := k.handlePidNamespace(grpcSpec, sandbox)
+		if err != nil {
+			return nil, err
+		}
 
-	if _, err = k.sendReq(req); err != nil {
-		return nil, err
-	}
+		// We need to constraint the spec to make sure we're not passing
+		// irrelevant information to the agent.
+		constraintGRPCSpec(grpcSpec, sandbox.config.SystemdCgroup)
 
-	createNSList := []ns.NSType{ns.NSTypePID}
+		k.handleShm(grpcSpec, sandbox)
 
-	enterNSList := []ns.Namespace{}
-	if sandbox.networkNS.NetNsPath != "" {
-		enterNSList = append(enterNSList, ns.Namespace{
-			Path: sandbox.networkNS.NetNsPath,
-			Type: ns.NSTypeNet,
-		})
-	}
+		req := &grpc.CreateContainerRequest{
+			ContainerId:  c.id,
+			ExecId:       c.id,
+			Storages:     ctrStorages,
+			Devices:      ctrDevices,
+			OCI:          grpcSpec,
+			SandboxPidns: sharedPidNs,
+		}
 
-	return prepareAndStartShim(sandbox, k.shim, c.id, req.ExecId,
-		k.state.URL, c.config.Cmd, createNSList, enterNSList)
+		if _, err = k.sendReq(req); err != nil {
+			return nil, err
+		}
+
+		createNSList := []ns.NSType{ns.NSTypePID}
+
+		enterNSList := []ns.Namespace{}
+		if sandbox.networkNS.NetNsPath != "" {
+			enterNSList = append(enterNSList, ns.Namespace{
+				Path: sandbox.networkNS.NetNsPath,
+				Type: ns.NSTypeNet,
+			})
+		}
+
+		return prepareAndStartShim(sandbox, k.shim, c.id, req.ExecId,
+			k.state.URL, c.config.Cmd, createNSList, enterNSList)
+	*/
+	return nil
 }
 
 func (k *kataAgent) createContainerFC(sandbox *Sandbox, c *Container) (p *Process, err error) {
