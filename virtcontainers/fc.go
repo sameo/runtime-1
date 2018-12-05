@@ -412,7 +412,7 @@ func (fc *firecracker) addDevice(devInfo interface{}, devType deviceType) error 
 	case config.BlockDrive:
 		return fc.fcAddBlockDrive(v)
 	case kataVSOCK:
-		return fc.fcAddVsock(v)
+		//return fc.fcAddVsock(v)
 	default:
 		break
 	}
