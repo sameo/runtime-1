@@ -14,6 +14,7 @@ import (
 	//"path/filepath"
 	//"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	//"github.com/kata-containers/runtime/virtcontainers/pkg/uuid"
@@ -34,9 +35,43 @@ import (
 	ops "github.com/kata-containers/runtime/virtcontainers/pkg/fireclient/client/operations"
 )
 
+type vmmState uint8
+
+const (
+	notReady vmmState = iota
+	apiReady
+	vmReady
+)
+
+func (s vmmState) String() string {
+	switch s {
+	case notReady:
+		return "not ready"
+	case apiReady:
+		return "FC API ready"
+	case vmReady:
+		return "VM ready"
+	}
+
+	return ""
+}
+
+type firecrackerState struct {
+	sync.RWMutex
+	state vmmState
+}
+
+func (s *firecrackerState) set(state vmmState) {
+	s.Lock()
+	defer s.Unlock()
+
+	s.state = state
+}
+
 // firecracker is an Hypervisor interface implementation for the firecracker hypervisor.
 type firecracker struct {
 	id string
+	state firecrackerState
 
 	firecrackerd *exec.Cmd           //Tracks the firecracker process itself
 	client       *client.Firecracker //Tracks the current active connection
@@ -86,6 +121,7 @@ func (fc *firecracker) init(ctx context.Context, id string, hypervisorConfig *Hy
 	fc.guestCid = 3 //TODO: Find an unique value per VM
 	fc.storage = storage
 	fc.config = *hypervisorConfig
+	fc.state.set(notReady)
 
 	return nil
 }
@@ -148,6 +184,9 @@ func (fc *firecracker) fcInit(fcSocket string) error {
 		fc.Logger().WithField("fcInit failed:", err).Debug()
 		return err
 	}
+
+	fc.state.set(apiReady)
+
 	return nil
 }
 
@@ -217,6 +256,8 @@ func (fc *firecracker) fcStartVM() error {
 		fc.Logger().WithField("start firecracker virtual machine failed:", err).Debug()
 		return err
 	}
+
+	fc.state.set(vmReady)
 
 	return nil
 }
@@ -440,7 +481,7 @@ func (fc *firecracker) getSandboxConsole(id string) (string, error) {
 }
 
 func (fc *firecracker) disconnect() {
-	// not sure if this is really necessary, at least in the first pass
+	fc.state.set(notReady)
 	return
 }
 
