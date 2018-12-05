@@ -144,15 +144,6 @@ func (fc *firecracker) fcInit(fcSocket string) error {
 	fc.firecrackerd = cmd
 	fc.client = fc.newFireClient("/tmp/" + fcSocket)
 
-	vsockParams := ops.NewPutGuestVsockByIDParams()
-	vsockID := "root"
-	vsock := &models.Vsock{
-		GuestCid: 3,
-		ID:       &vsockID,
-	}
-	vsockParams.SetID(vsockID)
-	vsockParams.SetBody(vsock)
-	_, _, err = fc.client.Operations.PutGuestVsockByID(vsockParams)
 	if err != nil {
 		fc.Logger().WithField("fcInit failed:", err).Debug()
 		return err
@@ -340,7 +331,30 @@ func (fc *firecracker) resumeSandbox() error {
 	return nil
 }
 
+func (fc *firecracker) fcAddVsock(vs kataVSOCK) error {
+	span, _ := fc.trace("fcAddVsock")
+	defer span.Finish()
+
+	vsockParams := ops.NewPutGuestVsockByIDParams()
+	vsockID := "root"
+	vsock := &models.Vsock{
+		GuestCid: int64(vs.contextID),
+		ID:       &vsockID,
+	}
+	vsockParams.SetID(vsockID)
+	vsockParams.SetBody(vsock)
+	_, _, err := fc.client.Operations.PutGuestVsockByID(vsockParams)
+	if err != nil {
+		fc.Logger().WithField("fcAddVsock:", err).Debug()
+		return err
+	}
+	return nil
+}
+
 func (fc *firecracker) fcAddNetDevice(endpoint Endpoint) error {
+	span, _ := fc.trace("fcAddNetDevice")
+	defer span.Finish()
+
 	cfg := ops.NewPutGuestNetworkInterfaceByIDParams()
 	ifaceID := endpoint.Name()
 	ifaceCfg := &models.NetworkInterface{
@@ -362,6 +376,9 @@ func (fc *firecracker) fcAddNetDevice(endpoint Endpoint) error {
 }
 
 func (fc *firecracker) fcAddBlockDrive(drive config.BlockDrive) error {
+	span, _ := fc.trace("fcAddBlockDrive")
+	defer span.Finish()
+
 	driveID := drive.ID
 	driveParams := ops.NewPutGuestDriveByIDParams()
 	driveParams.SetDriveID(driveID)
@@ -394,6 +411,8 @@ func (fc *firecracker) addDevice(devInfo interface{}, devType deviceType) error 
 		return fc.fcAddNetDevice(v)
 	case config.BlockDrive:
 		return fc.fcAddBlockDrive(v)
+	case kataVSOCK:
+		return fc.fcAddVsock(v)
 	default:
 		break
 	}
