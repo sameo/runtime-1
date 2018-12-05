@@ -81,7 +81,14 @@ type firecracker struct {
 
 	config HypervisorConfig
 
+	pendingDevices []firecrackerDevice // Devices to be added when the FC API is ready
+
 	ctx context.Context
+}
+
+type firecrackerDevice struct {
+	dev interface{}
+	devType deviceType
 }
 
 // Logger returns a logrus logger appropriate for logging firecracker  messages
@@ -303,6 +310,12 @@ func (fc *firecracker) startSandbox() error {
 
 	fc.fcSetVMRootfs(image)
 
+	for _, d := range fc.pendingDevices {
+		if err = fc.addDevice(d.dev, d.devType); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -447,13 +460,29 @@ func (fc *firecracker) addDevice(devInfo interface{}, devType deviceType) error 
 	span, _ := fc.trace("addDevice")
 	defer span.Finish()
 
+	fc.state.RLock()
+	defer fc.state.RUnlock()
+
+	if fc.state.state == notReady {
+		dev := firecrackerDevice{
+			dev: devInfo,
+			devType: devType,
+		}
+		fc.Logger().Warn("FC not ready, queueing device")
+		fc.pendingDevices = append(fc.pendingDevices, dev)
+		return nil
+	}
+
 	switch v := devInfo.(type) {
 	case Endpoint:
+		fc.Logger().Info("Adding net device")
 		return fc.fcAddNetDevice(v)
 	case config.BlockDrive:
+		fc.Logger().Info("Adding block device")
 		return fc.fcAddBlockDrive(v)
 	case kataVSOCK:
-		//return fc.fcAddVsock(v)
+		fc.Logger().Info("Adding vsock")
+		return fc.fcAddVsock(v)
 	default:
 		break
 	}
