@@ -132,9 +132,14 @@ func (fc *firecracker) fcInit(fcSocket string) error {
 	cmd := exec.Command(fireCracker, args...)
 	err := cmd.Start()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error starting firecracker", err)
+		fc.Logger().WithField("Error starting firecracker", err).Debug()
 		os.Exit(1)
 	}
+
+	//TODO: It take time for the process to respond
+	//Need to see if firecracker can accept a precreated socket
+	//or we need to wait for it respond back by examining stdout
+	time.Sleep(1000 * time.Millisecond)
 
 	fc.firecrackerd = cmd
 	fc.client = fc.newFireClient("/tmp/" + fcSocket)
@@ -207,6 +212,9 @@ func (fc *firecracker) fcStartVM() error {
 	defer span.Finish()
 
 	fc.Logger().Info("Starting VM")
+
+	//TODO: The connection need to resetup if it does not exist
+	fc.client = fc.newFireClient("/tmp/" + fc.id)
 
 	actionParams := ops.NewCreateSyncActionParams()
 	actionInfo := &models.InstanceActionInfo{
