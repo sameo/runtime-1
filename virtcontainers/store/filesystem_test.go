@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -63,4 +64,25 @@ func TestStoreFilesystemLoad(t *testing.T) {
 	err = f.load(State, &newData)
 	assert.Nil(t, err)
 	assert.Equal(t, newData, data)
+}
+
+func TestStoreFilesystemDelete(t *testing.T) {
+	f := filesystem{}
+
+	err := f.new(context.Background(), rootPath, "")
+	assert.Nil(t, err)
+
+	data := TestNoopStructure{
+		Field1: "value1",
+		Field2: "value2",
+	}
+
+	// Store test data
+	err = f.store(State, data)
+	assert.Nil(t, err)
+
+	f.delete()
+
+	_, err = os.Stat(f.path)
+	assert.NotNil(t, err)
 }

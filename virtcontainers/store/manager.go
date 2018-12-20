@@ -173,6 +173,13 @@ func New(ctx context.Context, root string) (*Store, error) {
 	return s, nil
 }
 
+// DeleteAll deletes all Stores from the manager.
+func DeleteAll() {
+	for _, s := range stores.stores {
+		s.Delete()
+	}
+}
+
 var storeLog = logrus.WithField("source", "virtcontainers/store")
 
 // Logger returns a logrus logger appropriate for logging Store messages
@@ -221,4 +228,18 @@ func (s *Store) Store(item Item, data interface{}) error {
 	defer s.Unlock()
 
 	return s.backend.store(item, data)
+}
+
+// Delete deletes all artifacts created by a Store.
+// The Store is also removed from the manager.
+func (s *Store) Delete() {
+	span, _ := s.trace("Store")
+	defer span.Finish()
+
+	s.Lock()
+	defer s.Unlock()
+
+	s.backend.delete()
+	stores.removeStore(s.root)
+	s.root = ""
 }
