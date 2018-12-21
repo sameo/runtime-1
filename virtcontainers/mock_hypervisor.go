@@ -8,6 +8,8 @@ package virtcontainers
 import (
 	"context"
 	"os"
+
+	"github.com/kata-containers/runtime/virtcontainers/store"
 )
 
 type mockHypervisor struct {
@@ -21,7 +23,7 @@ func (m *mockHypervisor) hypervisorConfig() HypervisorConfig {
 	return HypervisorConfig{}
 }
 
-func (m *mockHypervisor) createSandbox(ctx context.Context, id string, hypervisorConfig *HypervisorConfig, storage resourceStorage) error {
+func (m *mockHypervisor) createSandbox(ctx context.Context, id string, hypervisorConfig *HypervisorConfig, store *store.VCStore) error {
 	err := hypervisorConfig.valid()
 	if err != nil {
 		return err

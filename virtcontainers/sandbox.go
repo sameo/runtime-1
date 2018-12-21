@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/kata-containers/runtime/virtcontainers/device/drivers"
 	deviceManager "github.com/kata-containers/runtime/virtcontainers/device/manager"
 	vcTypes "github.com/kata-containers/runtime/virtcontainers/pkg/types"
+	"github.com/kata-containers/runtime/virtcontainers/store"
 	"github.com/kata-containers/runtime/virtcontainers/types"
 	"github.com/kata-containers/runtime/virtcontainers/utils"
 	"github.com/vishvananda/netlink"
@@ -138,64 +138,6 @@ func (sandboxConfig *SandboxConfig) valid() bool {
 	return true
 }
 
-const (
-	// R/W lock
-	exclusiveLock = syscall.LOCK_EX
-
-	// Read only lock
-	sharedLock = syscall.LOCK_SH
-)
-
-// rLockSandbox locks the sandbox with a shared lock.
-func rLockSandbox(sandboxID string) (*os.File, error) {
-	return lockSandbox(sandboxID, sharedLock)
-}
-
-// rwLockSandbox locks the sandbox with an exclusive lock.
-func rwLockSandbox(sandboxID string) (*os.File, error) {
-	return lockSandbox(sandboxID, exclusiveLock)
-}
-
-// lock locks any sandbox to prevent it from being accessed by other processes.
-func lockSandbox(sandboxID string, lockType int) (*os.File, error) {
-	if sandboxID == "" {
-		return nil, errNeedSandboxID
-	}
-
-	fs := filesystem{}
-	sandboxlockFile, _, err := fs.sandboxURI(sandboxID, lockFileType)
-	if err != nil {
-		return nil, err
-	}
-
-	lockFile, err := os.Open(sandboxlockFile)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := syscall.Flock(int(lockFile.Fd()), lockType); err != nil {
-		return nil, err
-	}
-
-	return lockFile, nil
-}
-
-// unlock unlocks any sandbox to allow it being accessed by other processes.
-func unlockSandbox(lockFile *os.File) error {
-	if lockFile == nil {
-		return fmt.Errorf("lockFile cannot be empty")
-	}
-
-	err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	if err != nil {
-		return err
-	}
-
-	lockFile.Close()
-
-	return nil
-}
-
 // Sandbox is composed of a set of containers and a runtime environment.
 // A Sandbox can be created, deleted, started, paused, stopped, listed, entered, and restored.
 type Sandbox struct {
@@ -205,7 +147,7 @@ type Sandbox struct {
 	factory    Factory
 	hypervisor hypervisor
 	agent      agent
-	storage    resourceStorage
+	store      *store.VCStore
 	network    network
 	monitor    *monitor
 
@@ -270,12 +212,7 @@ func (s *Sandbox) SetAnnotations(annotations map[string]string) error {
 		s.config.Annotations[k] = v
 	}
 
-	err := s.storage.storeSandboxResource(s.id, configFileType, *(s.config))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return s.store.Store(store.Configuration, *(s.config))
 }
 
 // GetAnnotations returns sandbox's annotations
@@ -477,7 +414,7 @@ func (s *Sandbox) getAndStoreGuestDetails() error {
 			s.seccompSupported = guestDetailRes.AgentDetails.SupportsSeccomp
 		}
 
-		if err = s.storage.storeSandboxResource(s.id, stateFileType, s.state); err != nil {
+		if err = s.store.Store(store.State, s.state); err != nil {
 			return err
 		}
 	}
@@ -504,14 +441,14 @@ func createSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Fac
 	}
 
 	// Fetch sandbox network to be able to access it from the sandbox structure.
-	networkNS, err := s.storage.fetchSandboxNetwork(s.id)
-	if err == nil {
+	var networkNS NetworkNamespace
+	if err := s.store.Load(store.Network, &networkNS); err != nil {
 		s.networkNS = networkNS
 	}
 
-	devices, err := s.storage.fetchSandboxDevices(s.id)
+	devices, err := s.store.LoadDevices()
 	if err != nil {
-		s.Logger().WithError(err).WithField("sandboxid", s.id).Warning("fetch sandbox device failed")
+		s.Logger().WithError(err).WithField("sandboxid", s.id).Warning("load sandbox devices failed")
 	}
 	s.devManager = deviceManager.NewDeviceManager(sandboxConfig.HypervisorConfig.BlockDeviceDriver, devices)
 
@@ -519,7 +456,7 @@ func createSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Fac
 	// If it exists, this means this is a re-creation, i.e.
 	// we don't need to talk to the guest's agent, but only
 	// want to create the sandbox and its containers in memory.
-	state, err := s.storage.fetchSandboxState(s.id)
+	state, err := s.store.LoadState()
 	if err == nil && state.State != "" {
 		s.state = state
 		return s, nil
@@ -560,13 +497,12 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 		factory:         factory,
 		hypervisor:      hypervisor,
 		agent:           agent,
-		storage:         &filesystem{},
 		network:         network,
 		config:          &sandboxConfig,
 		volumes:         sandboxConfig.Volumes,
 		containers:      map[string]*Container{},
-		runPath:         filepath.Join(runStoragePath, sandboxConfig.ID),
-		configPath:      filepath.Join(configStoragePath, sandboxConfig.ID),
+		runPath:         store.SandboxRuntimeRootPath(sandboxConfig.ID),
+		configPath:      store.SandboxConfigurationRootPath(sandboxConfig.ID),
 		state:           types.State{},
 		annotationsLock: &sync.RWMutex{},
 		wg:              &sync.WaitGroup{},
@@ -575,6 +511,13 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 		stateful:        sandboxConfig.Stateful,
 		ctx:             ctx,
 	}
+
+	vcStore, err := store.NewVCSandboxStore(ctx, s.id)
+	if err != nil {
+		return nil, err
+	}
+
+	s.store = vcStore
 
 	if err = globalSandboxList.addSandbox(s); err != nil {
 		return nil, err
@@ -587,17 +530,13 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 		}
 	}()
 
-	if err = s.storage.createAllResources(ctx, s); err != nil {
-		return nil, err
-	}
-
 	defer func() {
 		if err != nil {
-			s.storage.deleteSandboxResources(s.id, nil)
+			s.store.Delete()
 		}
 	}()
 
-	if err = s.hypervisor.createSandbox(ctx, s.id, &sandboxConfig.HypervisorConfig, s.storage); err != nil {
+	if err = s.hypervisor.createSandbox(ctx, s.id, &sandboxConfig.HypervisorConfig, s.store); err != nil {
 		return nil, err
 	}
 
@@ -615,7 +554,7 @@ func newSandbox(ctx context.Context, sandboxConfig SandboxConfig, factory Factor
 }
 
 func (s *Sandbox) storeSandboxDevices() error {
-	return s.storage.storeSandboxDevices(s.id, s.devManager.GetAllDevices())
+	return s.store.StoreDevices(s.devManager.GetAllDevices())
 }
 
 // storeSandbox stores a sandbox config.
@@ -623,19 +562,46 @@ func (s *Sandbox) storeSandbox() error {
 	span, _ := s.trace("storeSandbox")
 	defer span.Finish()
 
-	err := s.storage.storeSandboxResource(s.id, configFileType, *(s.config))
+	err := s.store.Store(store.Configuration, *(s.config))
 	if err != nil {
 		return err
 	}
 
-	for id, container := range s.containers {
-		err = s.storage.storeContainerResource(s.id, id, configFileType, *(container.config))
+	for _, container := range s.containers {
+		err = container.store.Store(store.Configuration, *(container.config))
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func rLockSandbox(sandboxID string) (string, error) {
+	store, err := store.NewVCSandboxStore(context.Background(), sandboxID)
+	if err != nil {
+		return "", err
+	}
+
+	return store.RLock()
+}
+
+func rwLockSandbox(sandboxID string) (string, error) {
+	store, err := store.NewVCSandboxStore(context.Background(), sandboxID)
+	if err != nil {
+		return "", err
+	}
+
+	return store.Lock()
+}
+
+func unlockSandbox(sandboxID, token string) error {
+	store, err := store.NewVCSandboxStore(context.Background(), sandboxID)
+	if err != nil {
+		return err
+	}
+
+	return store.Unlock(token)
 }
 
 // fetchSandbox fetches a sandbox config from a sandbox ID and returns a sandbox.
@@ -650,9 +616,14 @@ func fetchSandbox(ctx context.Context, sandboxID string) (sandbox *Sandbox, err 
 		return sandbox, err
 	}
 
-	fs := filesystem{}
-	config, err := fs.fetchSandboxConfig(sandboxID)
+	// We're bootstrapping
+	vcStore, err := store.NewVCSandboxStore(context.Background(), sandboxID)
 	if err != nil {
+		return nil, err
+	}
+
+	var config SandboxConfig
+	if err := vcStore.Load(store.Configuration, &config); err != nil {
 		return nil, err
 	}
 
@@ -744,7 +715,9 @@ func (s *Sandbox) Delete() error {
 		s.Logger().WithError(err).Error("failed to cleanup hypervisor")
 	}
 
-	return s.storage.deleteSandboxResources(s.id, nil)
+	s.store.Delete()
+
+	return nil
 }
 
 func (s *Sandbox) startNetworkMonitor() error {
@@ -810,7 +783,7 @@ func (s *Sandbox) createNetwork() error {
 	}
 
 	// Store the network
-	return s.storage.storeSandboxNetwork(s.id, s.networkNS)
+	return s.store.Store(store.Network, s.networkNS)
 }
 
 func (s *Sandbox) removeNetwork() error {
@@ -878,7 +851,7 @@ func (s *Sandbox) AddInterface(inf *vcTypes.Interface) (*vcTypes.Interface, erro
 
 	// Update the sandbox storage
 	s.networkNS.Endpoints = append(s.networkNS.Endpoints, endpoint)
-	if err := s.storage.storeSandboxNetwork(s.id, s.networkNS); err != nil {
+	if err := s.store.Store(store.Network, s.networkNS); err != nil {
 		return nil, err
 	}
 
@@ -896,7 +869,7 @@ func (s *Sandbox) RemoveInterface(inf *vcTypes.Interface) (*vcTypes.Interface, e
 				return inf, err
 			}
 			s.networkNS.Endpoints = append(s.networkNS.Endpoints[:i], s.networkNS.Endpoints[i+1:]...)
-			if err := s.storage.storeSandboxNetwork(s.id, s.networkNS); err != nil {
+			if err := s.store.Store(store.Network, s.networkNS); err != nil {
 				return inf, err
 			}
 			break
@@ -964,7 +937,7 @@ func (s *Sandbox) startVM() error {
 				return err
 			}
 		}
-		if err := s.storage.storeSandboxNetwork(s.id, s.networkNS); err != nil {
+		if err := s.store.Store(store.Network, s.networkNS); err != nil {
 			return err
 		}
 	}
@@ -1061,8 +1034,7 @@ func (s *Sandbox) CreateContainer(contConfig ContainerConfig) (VCContainer, erro
 		return nil, err
 	}
 
-	err = s.storage.storeSandboxResource(s.id, configFileType, *(s.config))
-	if err != nil {
+	if err := s.store.Store(store.Configuration, *(s.config)); err != nil {
 		return nil, err
 	}
 
@@ -1146,8 +1118,7 @@ func (s *Sandbox) DeleteContainer(containerID string) (VCContainer, error) {
 	}
 
 	// Store sandbox config
-	err = s.storage.storeSandboxResource(s.id, configFileType, *(s.config))
-	if err != nil {
+	if err := s.store.Store(store.Configuration, *(s.config)); err != nil {
 		return nil, err
 	}
 
@@ -1393,7 +1364,7 @@ func (s *Sandbox) setSandboxState(state types.StateString) error {
 	s.state.State = state
 
 	// update on-disk state
-	return s.storage.storeSandboxResource(s.id, stateFileType, s.state)
+	return s.store.Store(store.State, s.state)
 }
 
 func (s *Sandbox) pauseSetStates() error {
@@ -1426,8 +1397,7 @@ func (s *Sandbox) getAndSetSandboxBlockIndex() (int, error) {
 	s.state.BlockIndex++
 
 	// update on-disk state
-	err := s.storage.storeSandboxResource(s.id, stateFileType, s.state)
-	if err != nil {
+	if err := s.store.Store(store.State, s.state); err != nil {
 		return -1, err
 	}
 
@@ -1440,8 +1410,7 @@ func (s *Sandbox) decrementSandboxBlockIndex() error {
 	s.state.BlockIndex--
 
 	// update on-disk state
-	err := s.storage.storeSandboxResource(s.id, stateFileType, s.state)
-	if err != nil {
+	if err := s.store.Store(store.State, s.state); err != nil {
 		return err
 	}
 
@@ -1454,7 +1423,7 @@ func (s *Sandbox) setSandboxPid(pid int) error {
 	s.state.Pid = pid
 
 	// update on-disk state
-	return s.storage.storeSandboxResource(s.id, stateFileType, s.state)
+	return s.store.Store(store.State, s.state)
 }
 
 func (s *Sandbox) setContainersState(state types.StateString) error {
@@ -1471,32 +1440,7 @@ func (s *Sandbox) setContainersState(state types.StateString) error {
 	return nil
 }
 
-func (s *Sandbox) deleteContainerState(containerID string) error {
-	if containerID == "" {
-		return errNeedContainerID
-	}
-
-	err := s.storage.deleteContainerResources(s.id, containerID, []sandboxResource{stateFileType})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *Sandbox) deleteContainersState() error {
-	for _, container := range s.config.Containers {
-		err := s.deleteContainerState(container.ID)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// togglePauseSandbox pauses a sandbox if pause is set to true, else it resumes
-// it.
+// togglePauseSandbox pauses a sandbox if pause is set to true, else it resumes it.
 func togglePauseSandbox(ctx context.Context, sandboxID string, pause bool) (*Sandbox, error) {
 	span, ctx := trace(ctx, "togglePauseSandbox")
 	defer span.Finish()
@@ -1509,7 +1453,7 @@ func togglePauseSandbox(ctx context.Context, sandboxID string, pause bool) (*San
 	if err != nil {
 		return nil, err
 	}
-	defer unlockSandbox(lockFile)
+	defer unlockSandbox(sandboxID, lockFile)
 
 	// Fetch the sandbox from storage and create it.
 	s, err := fetchSandbox(ctx, sandboxID)

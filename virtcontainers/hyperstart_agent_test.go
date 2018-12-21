@@ -6,6 +6,7 @@
 package virtcontainers
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/kata-containers/runtime/virtcontainers/pkg/hyperstart"
+	"github.com/kata-containers/runtime/virtcontainers/store"
 	"github.com/kata-containers/runtime/virtcontainers/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
@@ -72,13 +74,13 @@ func TestHyperstartGenerateSocketsSuccessfulNoPathProvided(t *testing.T) {
 		{
 			DeviceID: fmt.Sprintf(defaultDeviceIDTemplate, 0),
 			ID:       fmt.Sprintf(defaultIDTemplate, 0),
-			HostPath: fmt.Sprintf(defaultSockPathTemplates[0], runStoragePath, sandbox.id),
+			HostPath: fmt.Sprintf(defaultSockPathTemplates[0], store.RunStoragePath, sandbox.id),
 			Name:     fmt.Sprintf(defaultChannelTemplate, 0),
 		},
 		{
 			DeviceID: fmt.Sprintf(defaultDeviceIDTemplate, 1),
 			ID:       fmt.Sprintf(defaultIDTemplate, 1),
-			HostPath: fmt.Sprintf(defaultSockPathTemplates[1], runStoragePath, sandbox.id),
+			HostPath: fmt.Sprintf(defaultSockPathTemplates[1], store.RunStoragePath, sandbox.id),
 			Name:     fmt.Sprintf(defaultChannelTemplate, 1),
 		},
 	}
@@ -245,12 +247,16 @@ func TestHyperSetProxy(t *testing.T) {
 
 	h := &hyper{}
 	p := &ccProxy{}
-	s := &Sandbox{storage: &filesystem{}}
+	s := &Sandbox{
+		ctx: context.Background(),
+	}
 
-	err := h.setProxy(s, p, 0, "")
-	assert.Error(err)
+	vcStore, err := store.NewVCSandboxStore(s.ctx, "foobar")
+	assert.Nil(err)
 
-	err = h.setProxy(s, p, 0, "foobar")
+	s.store = vcStore
+
+	err = h.setProxy(s, p, 0, "")
 	assert.Error(err)
 }
 

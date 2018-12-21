@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/kata-containers/runtime/virtcontainers/device/config"
+	"github.com/kata-containers/runtime/virtcontainers/store"
 )
 
 // HypervisorType describes an hypervisor type.
@@ -590,7 +591,7 @@ func RunningOnVMM(cpuInfoPath string) (bool, error) {
 // hypervisor is the virtcontainers hypervisor interface.
 // The default hypervisor implementation is Qemu.
 type hypervisor interface {
-	createSandbox(ctx context.Context, id string, hypervisorConfig *HypervisorConfig, storage resourceStorage) error
+	createSandbox(ctx context.Context, id string, hypervisorConfig *HypervisorConfig, store *store.VCStore) error
 	startSandbox(timeout int) error
 	stopSandbox() error
 	pauseSandbox() error
