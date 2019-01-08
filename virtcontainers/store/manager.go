@@ -243,3 +243,16 @@ func (s *Store) Delete() {
 	stores.removeStore(s.root)
 	s.root = ""
 }
+
+// Raw creates a raw item to be handled directly by the API caller.
+// It returns a full URL to the item and the caller is responsible
+// for handling the item through this URL.
+func (s *Store) Raw(id string) (string, error) {
+	span, _ := s.trace("Raw")
+	defer span.Finish()
+
+	s.Lock()
+	defer s.Unlock()
+
+	return s.backend.raw(id)
+}
