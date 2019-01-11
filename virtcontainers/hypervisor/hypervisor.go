@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-package virtcontainers
+package hypervisor
 
 import (
 	"bufio"
@@ -18,20 +18,20 @@ import (
 	"github.com/kata-containers/runtime/virtcontainers/store"
 )
 
-// HypervisorType describes an hypervisor type.
-type HypervisorType string
+// Type describes an hypervisor type.
+type Type string
 
 type operation int
 
 const (
 	// FirecrackerHypervisor is the FC hypervisor.
-	FirecrackerHypervisor HypervisorType = "firecracker"
+	Firecracker Type = "firecracker"
 
-	// QemuHypervisor is the QEMU hypervisor.
-	QemuHypervisor HypervisorType = "qemu"
+	// Qemu is the QEMU hypervisor.
+	Qemu Type = "qemu"
 
-	// MockHypervisor is a mock hypervisor for testing purposes
-	MockHypervisor HypervisorType = "mock"
+	// Mock is a mock hypervisor for testing purposes
+	Mock Type = "mock"
 )
 
 const (
@@ -99,7 +99,7 @@ type memoryDevice struct {
 }
 
 // Set sets an hypervisor type based on the input string.
-func (hType *HypervisorType) Set(value string) error {
+func (hType *Type) Set(value string) error {
 	switch value {
 	case "qemu":
 		*hType = QemuHypervisor
@@ -116,30 +116,30 @@ func (hType *HypervisorType) Set(value string) error {
 }
 
 // String converts an hypervisor type to a string.
-func (hType *HypervisorType) String() string {
-	switch *hType {
-	case QemuHypervisor:
-		return string(QemuHypervisor)
-	case FirecrackerHypervisor:
-		return string(FirecrackerHypervisor)
-	case MockHypervisor:
-		return string(MockHypervisor)
+func (h *Type) String() string {
+	switch *h {
+	case Qemu:
+		return string(Qemu)
+	case Firecracker:
+		return string(Firecracker)
+	case Mock:
+		return string(Mock)
 	default:
 		return ""
 	}
 }
 
 // newHypervisor returns an hypervisor from and hypervisor type.
-func newHypervisor(hType HypervisorType) (hypervisor, error) {
-	switch hType {
-	case QemuHypervisor:
+func newHypervisor(h Type) (hypervisor, error) {
+	switch h {
+	case Qemu:
 		return &qemu{}, nil
-	case FirecrackerHypervisor:
+	case Firecracker:
 		return &firecracker{}, nil
-	case MockHypervisor:
+	case Mock:
 		return &mockHypervisor{}, nil
 	default:
-		return nil, fmt.Errorf("Unknown hypervisor type %s", hType)
+		return nil, fmt.Errorf("Unknown hypervisor type %s", h)
 	}
 }
 
@@ -150,7 +150,7 @@ type Param struct {
 }
 
 // HypervisorConfig is the hypervisor configuration.
-type HypervisorConfig struct {
+type Config struct {
 	// NumVCPUs specifies default number of vCPUs for the VM.
 	NumVCPUs uint32
 
@@ -288,7 +288,7 @@ type threadIDs struct {
 	vcpus []int
 }
 
-func (conf *HypervisorConfig) checkTemplateConfig() error {
+func (conf *Config) checkTemplateConfig() error {
 	if conf.BootToBeTemplate && conf.BootFromTemplate {
 		return fmt.Errorf("Cannot set both 'to be' and 'from' vm tempate")
 	}
@@ -306,7 +306,7 @@ func (conf *HypervisorConfig) checkTemplateConfig() error {
 	return nil
 }
 
-func (conf *HypervisorConfig) valid() error {
+func (conf *Config) valid() error {
 	if conf.KernelPath == "" {
 		return fmt.Errorf("Missing kernel path")
 	}
@@ -348,7 +348,7 @@ func (conf *HypervisorConfig) valid() error {
 
 // AddKernelParam allows the addition of new kernel parameters to an existing
 // hypervisor configuration.
-func (conf *HypervisorConfig) AddKernelParam(p Param) error {
+func (conf *Config) AddKernelParam(p Param) error {
 	if p.Key == "" {
 		return fmt.Errorf("Empty kernel parameter")
 	}
@@ -358,7 +358,7 @@ func (conf *HypervisorConfig) AddKernelParam(p Param) error {
 	return nil
 }
 
-func (conf *HypervisorConfig) addCustomAsset(a *asset) error {
+func (conf *Config) addCustomAsset(a *asset) error {
 	if a == nil || a.path == "" {
 		// We did not get a custom asset, we will use the default one.
 		return nil
@@ -379,7 +379,7 @@ func (conf *HypervisorConfig) addCustomAsset(a *asset) error {
 	return nil
 }
 
-func (conf *HypervisorConfig) assetPath(t assetType) (string, error) {
+func (conf *Config) assetPath(t assetType) (string, error) {
 	// Custom assets take precedence over the configured ones
 	a, ok := conf.customAssets[t]
 	if ok {
@@ -404,7 +404,7 @@ func (conf *HypervisorConfig) assetPath(t assetType) (string, error) {
 	}
 }
 
-func (conf *HypervisorConfig) isCustomAsset(t assetType) bool {
+func (conf *Config) isCustomAsset(t assetType) bool {
 	_, ok := conf.customAssets[t]
 	if ok {
 		return true
@@ -414,52 +414,52 @@ func (conf *HypervisorConfig) isCustomAsset(t assetType) bool {
 }
 
 // KernelAssetPath returns the guest kernel path
-func (conf *HypervisorConfig) KernelAssetPath() (string, error) {
+func (conf *Config) KernelAssetPath() (string, error) {
 	return conf.assetPath(kernelAsset)
 }
 
 // CustomKernelAsset returns true if the kernel asset is a custom one, false otherwise.
-func (conf *HypervisorConfig) CustomKernelAsset() bool {
+func (conf *Config) CustomKernelAsset() bool {
 	return conf.isCustomAsset(kernelAsset)
 }
 
 // ImageAssetPath returns the guest image path
-func (conf *HypervisorConfig) ImageAssetPath() (string, error) {
+func (conf *Config) ImageAssetPath() (string, error) {
 	return conf.assetPath(imageAsset)
 }
 
 // CustomImageAsset returns true if the image asset is a custom one, false otherwise.
-func (conf *HypervisorConfig) CustomImageAsset() bool {
+func (conf *Config) CustomImageAsset() bool {
 	return conf.isCustomAsset(imageAsset)
 }
 
 // InitrdAssetPath returns the guest initrd path
-func (conf *HypervisorConfig) InitrdAssetPath() (string, error) {
+func (conf *Config) InitrdAssetPath() (string, error) {
 	return conf.assetPath(initrdAsset)
 }
 
 // CustomInitrdAsset returns true if the initrd asset is a custom one, false otherwise.
-func (conf *HypervisorConfig) CustomInitrdAsset() bool {
+func (conf *Config) CustomInitrdAsset() bool {
 	return conf.isCustomAsset(initrdAsset)
 }
 
 // HypervisorAssetPath returns the VM hypervisor path
-func (conf *HypervisorConfig) HypervisorAssetPath() (string, error) {
+func (conf *Config) HypervisorAssetPath() (string, error) {
 	return conf.assetPath(hypervisorAsset)
 }
 
 // CustomHypervisorAsset returns true if the hypervisor asset is a custom one, false otherwise.
-func (conf *HypervisorConfig) CustomHypervisorAsset() bool {
+func (conf *Config) CustomHypervisorAsset() bool {
 	return conf.isCustomAsset(hypervisorAsset)
 }
 
 // FirmwareAssetPath returns the guest firmware path
-func (conf *HypervisorConfig) FirmwareAssetPath() (string, error) {
+func (conf *Config) FirmwareAssetPath() (string, error) {
 	return conf.assetPath(firmwareAsset)
 }
 
 // CustomFirmwareAsset returns true if the firmware asset is a custom one, false otherwise.
-func (conf *HypervisorConfig) CustomFirmwareAsset() bool {
+func (conf *Config) CustomFirmwareAsset() bool {
 	return conf.isCustomAsset(firmwareAsset)
 }
 
@@ -591,7 +591,7 @@ func RunningOnVMM(cpuInfoPath string) (bool, error) {
 // hypervisor is the virtcontainers hypervisor interface.
 // The default hypervisor implementation is Qemu.
 type hypervisor interface {
-	createSandbox(ctx context.Context, id string, hypervisorConfig *HypervisorConfig, store *store.VCStore) error
+	createSandbox(ctx context.Context, id string, config *Config, store *store.VCStore) error
 	startSandbox(timeout int) error
 	stopSandbox() error
 	pauseSandbox() error
@@ -605,7 +605,7 @@ type hypervisor interface {
 	getSandboxConsole(sandboxID string) (string, error)
 	disconnect()
 	capabilities() capabilities
-	hypervisorConfig() HypervisorConfig
+	hypervisorConfig() Config
 	getThreadIDs() (*threadIDs, error)
 	cleanup() error
 }
