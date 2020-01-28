@@ -284,8 +284,8 @@ func (q *qemuArchBase) bridges(number uint32) {
 func (q *qemuArchBase) cpuTopology(vcpus, maxvcpus uint32) govmmQemu.SMP {
 	smp := govmmQemu.SMP{
 		CPUs:    vcpus,
-		Sockets: maxvcpus,
-		Cores:   defaultCores,
+		Sockets: 1,
+		Cores:   vcpus,
 		Threads: defaultThreads,
 		MaxCPUs: maxvcpus,
 	}
